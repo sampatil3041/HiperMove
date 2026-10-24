@@ -7,8 +7,8 @@ HiperMove is an AI-assisted movement and mobility prototype designed to analyze 
 - **Frontend:** React + Vite (located in `frontend/`)
 - **Pose Landmarker:** `@mediapipe/tasks-vision` (browser-side execution)
 - **Squat Counter:** Deterministic Finite State Machine (pure application logic)
-- **Backend:** Node.js + Express (located in `backend/` — introduced in Phase 7)
-- **AI Summary:** Gemma 4 via Gemini API (evaluates calculated metrics only)
+- **Backend:** Node.js + Express (located in `backend/`)
+- **AI Summary:** Gemma 4 via Gemini API (Phase 8 — evaluates calculated metrics only)
 
 ## Directory Structure
 
@@ -17,36 +17,54 @@ hipermove/
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
+│   │   │   ├── VideoUploader.jsx
+│   │   │   ├── VideoPreview.jsx
+│   │   │   ├── PoseOverlay.jsx
+│   │   │   ├── ResultsDashboard.jsx
+│   │   │   └── StatusMessage.jsx
 │   │   ├── hooks/
+│   │   │   └── usePoseDetection.js
 │   │   ├── services/
+│   │   │   └── poseLandmarker.js
 │   │   ├── utils/
+│   │   │   ├── videoValidation.js
+│   │   │   ├── squatCounter.js
+│   │   │   └── movementMetrics.js
 │   │   ├── styles/
+│   │   │   └── global.css
 │   │   ├── App.jsx
 │   │   └── main.jsx
 │   ├── index.html
 │   ├── package.json
 │   └── vite.config.js
-├── backend/                  # Phase 7
+├── backend/
+│   ├── src/
+│   │   └── server.js
+│   ├── .env.example
+│   ├── .gitignore
+│   └── package.json
 ├── docs/                     # Testing & Demo resources
 ├── .gitignore
 └── README.md
 ```
 
-## Quick Start (Frontend)
+## Quick Start Guide
 
-1. Navigate to the frontend directory:
-   ```bash
-   cd frontend
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the development server:
-   ```bash
-   npm run dev
-   ```
-4. Open the displayed local URL (default: `http://localhost:3000`).
+### 1. Start the Backend Server (Port 3001)
+```bash
+cd backend
+npm install
+npm start
+```
+Health check endpoint: `http://localhost:3001/api/health`
+
+### 2. Start the Frontend Application (Port 3000)
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Open **`http://localhost:3000`** in your browser.
 
 ## Honest Limitations
 
