@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import analysisRoutes from './routes/analysis.js';
 
 dotenv.config();
 
@@ -21,13 +22,8 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Phase 8 Analysis Summary Endpoint placeholder
-app.post('/api/analysis/summary', (req, res) => {
-  res.status(501).json({
-    error: 'Not Implemented',
-    message: 'Gemma 4 AI summary endpoint will be implemented in Phase 8.'
-  });
-});
+// Mount Analysis Routes
+app.use('/api/analysis', analysisRoutes);
 
 // Catch-all 404 handler
 app.use((req, res) => {

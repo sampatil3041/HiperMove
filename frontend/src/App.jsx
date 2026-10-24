@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import VideoUploader from './components/VideoUploader.jsx';
 import PoseOverlay from './components/PoseOverlay.jsx';
 import ResultsDashboard from './components/ResultsDashboard.jsx';
+import AISummaryCard from './components/AISummaryCard.jsx';
 import StatusMessage from './components/StatusMessage.jsx';
 import { loadAndValidateVideoMetadata } from './utils/videoValidation.js';
 import { usePoseDetection } from './hooks/usePoseDetection.js';
@@ -404,15 +405,16 @@ export default function App() {
             )}
           </div>
 
-          {/* Section 4: Gemma 4 AI Summary (Phase 8 placeholder) */}
+          {/* Section 4: Gemma 4 AI Summary */}
           <div className="card">
             <h2 className="card-title">4. AI Session Summary</h2>
             <p className="card-desc">
               Plain-language explanation of measured metrics powered by Gemma 4.
             </p>
-            <div className="placeholder-box">
-              <p>AI session explanation will be connected in Phase 8 via backend endpoint.</p>
-            </div>
+            <AISummaryCard
+              metrics={sessionSummary}
+              isReady={Boolean(videoUrl && (counterState.repetitionCount > 0 || isAnalysisComplete || analysisStats.totalFrames > 10))}
+            />
           </div>
         </section>
       </main>
