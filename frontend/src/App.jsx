@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import VideoUploader from './components/VideoUploader.jsx';
 import VideoPreview from './components/VideoPreview.jsx';
+import PoseOverlay from './components/PoseOverlay.jsx';
 import StatusMessage from './components/StatusMessage.jsx';
 import { loadAndValidateVideoMetadata } from './utils/videoValidation.js';
+import { usePoseDetection } from './hooks/usePoseDetection.js';
 
 export default function App() {
   const [videoFile, setVideoFile] = useState(null);
@@ -10,6 +12,14 @@ export default function App() {
   const [videoUrl, setVideoUrl] = useState(null);
   const [isValidating, setIsValidating] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
+
+  // Video element reference for frame extraction
+  const [videoElement, setVideoElement] = useState(null);
+
+  // Phase 3: MediaPipe hook and static detection state
+  const { isModelLoading, isModelReady, modelError, detectStaticFrame } = usePoseDetection();
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [detectionResult, setDetectionResult] = useState(null);
 
   // Safely release object URLs on unmount or URL replacement
   useEffect(() => {
@@ -23,6 +33,7 @@ export default function App() {
   const handleFileSelected = async (file) => {
     setErrorMessage(null);
     setIsValidating(true);
+    setDetectionResult(null);
 
     try {
       const result = await loadAndValidateVideoMetadata(file);
@@ -33,7 +44,6 @@ export default function App() {
         return;
       }
 
-      // If there was an existing videoUrl, revoke it before setting new one
       if (videoUrl) {
         URL.revokeObjectURL(videoUrl);
       }
@@ -55,7 +65,29 @@ export default function App() {
     setVideoFile(null);
     setVideoMetadata(null);
     setVideoUrl(null);
+    setVideoElement(null);
+    setDetectionResult(null);
     setErrorMessage(null);
+  };
+
+  const handleRunStaticDetection = async () => {
+    if (!videoElement) {
+      setErrorMessage('Video is not ready yet. Please ensure the video has loaded in the preview.');
+      return;
+    }
+
+    setIsDetecting(true);
+    setErrorMessage(null);
+
+    try {
+      const result = await detectStaticFrame(videoElement);
+      setDetectionResult(result);
+    } catch (err) {
+      console.error('Pose detection error:', err);
+      setErrorMessage(`Pose detection error: ${err.message}`);
+    } finally {
+      setIsDetecting(false);
+    }
   };
 
   return (
@@ -68,7 +100,7 @@ export default function App() {
           </p>
         </div>
         <div>
-          <span className="badge-tag">Phase 2: Video Loading & Validation</span>
+          <span className="badge-tag">Phase 3: MediaPipe Pose Landmarker Active</span>
         </div>
       </header>
 
@@ -99,6 +131,7 @@ export default function App() {
                 videoUrl={videoUrl}
                 metadata={videoMetadata}
                 onReplaceVideo={handleResetVideo}
+                onVideoElementReady={(el) => setVideoElement(el)}
               />
             )}
           </div>
@@ -109,33 +142,38 @@ export default function App() {
             <p className="card-desc">
               MediaPipe Pose Landmarker estimates 33 body landmarks on sampled frames.
             </p>
-            <div className="placeholder-box">
-              <svg
-                width="40"
-                height="40"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ margin: '0 auto', color: '#64748b' }}
-              >
-                <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
-                <line x1="7" y1="2" x2="7" y2="22" />
-                <line x1="17" y1="2" x2="17" y2="22" />
-                <line x1="2" y1="12" x2="22" y2="12" />
-                <line x1="2" y1="7" x2="7" y2="7" />
-                <line x1="2" y1="17" x2="7" y2="17" />
-                <line x1="17" y1="17" x2="22" y2="17" />
-                <line x1="17" y1="7" x2="22" y2="7" />
-              </svg>
-              <p>
-                {videoUrl
-                  ? 'Video loaded and ready for Phase 3 (MediaPipe Landmarker integration).'
-                  : 'Synchronized video & pose canvas overlay will be implemented in Phases 3 and 4.'}
-              </p>
-            </div>
+
+            {videoUrl ? (
+              <PoseOverlay
+                detectionResult={detectionResult}
+                isModelLoading={isModelLoading}
+                isModelReady={isModelReady}
+                modelError={modelError}
+                onRunStaticDetection={handleRunStaticDetection}
+                isDetecting={isDetecting}
+                onClearStaticTest={() => setDetectionResult(null)}
+              />
+            ) : (
+              <div className="placeholder-box">
+                <svg
+                  width="40"
+                  height="40"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{ margin: '0 auto', color: '#64748b' }}
+                >
+                  <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+                  <line x1="7" y1="2" x2="7" y2="22" />
+                  <line x1="17" y1="2" x2="17" y2="22" />
+                  <line x1="2" y1="12" x2="22" y2="12" />
+                </svg>
+                <p>Upload a video above to run MediaPipe landmark estimation on a frame.</p>
+              </div>
+            )}
           </div>
         </section>
 
@@ -154,7 +192,7 @@ export default function App() {
               <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '8px', textAlign: 'center', border: '1px solid #334155' }}>
                 <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>State</div>
                 <div style={{ fontSize: '1.2rem', fontWeight: 600, color: '#94a3b8', marginTop: '0.75rem' }}>
-                  {videoUrl ? 'READY' : 'IDLE'}
+                  {detectionResult?.hasPose ? 'LANDMARKS READY' : videoUrl ? 'READY' : 'IDLE'}
                 </div>
               </div>
             </div>

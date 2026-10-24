@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 
 /**
  * Video preview and metadata inspector component
@@ -17,8 +17,20 @@ import React, { useRef } from 'react';
  *   isAnalyzing?: boolean
  * }} props
  */
-export default function VideoPreview({ videoUrl, metadata, onReplaceVideo, isAnalyzing = false }) {
+export default function VideoPreview({
+  videoUrl,
+  metadata,
+  onReplaceVideo,
+  isAnalyzing = false,
+  onVideoElementReady
+}) {
   const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (videoRef.current && onVideoElementReady) {
+      onVideoElementReady(videoRef.current);
+    }
+  }, [videoUrl, onVideoElementReady]);
 
   if (!videoUrl || !metadata) return null;
 
