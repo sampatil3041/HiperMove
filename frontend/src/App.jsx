@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import VideoUploader from './components/VideoUploader.jsx';
 import PoseOverlay from './components/PoseOverlay.jsx';
+import ResultsDashboard from './components/ResultsDashboard.jsx';
 import StatusMessage from './components/StatusMessage.jsx';
 import { loadAndValidateVideoMetadata } from './utils/videoValidation.js';
 import { usePoseDetection } from './hooks/usePoseDetection.js';
@@ -14,7 +15,7 @@ export default function App() {
   const [isValidating, setIsValidating] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
 
-  // Phase 4: MediaPipe Hook for video processing
+  // Phase 4 & 5: MediaPipe Hook & Squat Counter
   const {
     isModelLoading,
     isModelReady,
@@ -24,7 +25,6 @@ export default function App() {
     analysisStats
   } = usePoseDetection();
 
-  // Phase 5: Deterministic Squat Counter
   const squatCounterRef = useRef(new SquatCounter());
   const [counterState, setCounterState] = useState({
     state: SQUAT_STATES.UNKNOWN,
@@ -34,6 +34,10 @@ export default function App() {
     side: 'unknown',
     repHistory: []
   });
+
+  // Phase 6: Results dashboard and view tabs
+  const [activeMetricsTab, setActiveMetricsTab] = useState('live'); // 'live' | 'summary'
+  const [isAnalysisComplete, setIsAnalysisComplete] = useState(false);
 
   // Safely release object URLs on unmount or URL replacement
   useEffect(() => {
@@ -49,6 +53,8 @@ export default function App() {
     setIsValidating(true);
     resetAnalysisSession();
     squatCounterRef.current.reset();
+    setIsAnalysisComplete(false);
+    setActiveMetricsTab('live');
     setCounterState({
       state: SQUAT_STATES.UNKNOWN,
       repetitionCount: 0,
@@ -90,6 +96,8 @@ export default function App() {
     setVideoUrl(null);
     resetAnalysisSession();
     squatCounterRef.current.reset();
+    setIsAnalysisComplete(false);
+    setActiveMetricsTab('live');
     setCounterState({
       state: SQUAT_STATES.UNKNOWN,
       repetitionCount: 0,
@@ -125,6 +133,26 @@ export default function App() {
     });
   };
 
+  const handleAnalysisFinished = () => {
+    setIsAnalysisComplete(true);
+    setActiveMetricsTab('summary');
+  };
+
+  const handleReplaySession = () => {
+    resetAnalysisSession();
+    squatCounterRef.current.reset();
+    setIsAnalysisComplete(false);
+    setActiveMetricsTab('live');
+    setCounterState({
+      state: SQUAT_STATES.UNKNOWN,
+      repetitionCount: 0,
+      currentAngle: null,
+      minAngle: 180,
+      side: 'unknown',
+      repHistory: []
+    });
+  };
+
   const sessionSummary = buildMovementSessionSummary(
     squatCounterRef.current,
     videoMetadata ? videoMetadata.duration : 0
@@ -140,7 +168,7 @@ export default function App() {
           </p>
         </div>
         <div>
-          <span className="badge-tag">Phase 5: Squat Counter Active</span>
+          <span className="badge-tag">Phase 6: Results Dashboard Ready</span>
         </div>
       </header>
 
@@ -154,7 +182,7 @@ export default function App() {
 
       <main className="dashboard-grid">
         <section className="left-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* Phase 2: Video Selection / Upload */}
+          {/* Section 1: Video Selection */}
           <div className="card">
             <h2 className="card-title">1. Upload Video</h2>
             <p className="card-desc">
@@ -224,7 +252,7 @@ export default function App() {
             )}
           </div>
 
-          {/* Phase 3 & 4: Synchronized Video Player & Pose Analysis */}
+          {/* Section 2: Synchronized Video Player & Pose Analysis */}
           <div className="card">
             <h2 className="card-title">2. Pose Estimation & Video Analysis</h2>
             <p className="card-desc">
@@ -239,24 +267,14 @@ export default function App() {
                 isModelLoading={isModelLoading}
                 modelError={modelError}
                 detectVideoFrame={detectVideoFrame}
-                resetAnalysisSession={() => {
-                  resetAnalysisSession();
-                  squatCounterRef.current.reset();
-                  setCounterState({
-                    state: SQUAT_STATES.UNKNOWN,
-                    repetitionCount: 0,
-                    currentAngle: null,
-                    minAngle: 180,
-                    side: 'unknown',
-                    repHistory: []
-                  });
-                }}
+                resetAnalysisSession={handleReplaySession}
                 analysisStats={analysisStats}
                 onPoseUpdate={handlePoseUpdate}
                 liveAngleInfo={{
                   angle: counterState.currentAngle,
                   side: counterState.side
                 }}
+                onAnalysisFinished={handleAnalysisFinished}
               />
             ) : (
               <div className="placeholder-box">
@@ -267,110 +285,126 @@ export default function App() {
         </section>
 
         <section className="right-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* Phase 5: Deterministic Squat Repetition Counter & Metrics */}
+          {/* Section 3: Repetition Count & Results Dashboard */}
           <div className="card">
-            <h2 className="card-title">3. Repetition Count & Metrics</h2>
-            <p className="card-desc">
-              Deterministic finite state machine tracking completed squat cycles.
-            </p>
-
-            {/* Rep Counter & State Display */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-              <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '10px', textAlign: 'center', border: '1px solid #334155' }}>
-                <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Repetitions</div>
-                <div style={{ fontSize: '3rem', fontWeight: 800, color: '#38bdf8', lineHeight: 1.1, marginTop: '0.35rem' }}>
-                  {counterState.repetitionCount}
-                </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <div>
+                <h2 className="card-title" style={{ margin: 0 }}>3. Movement Analysis & Results</h2>
               </div>
 
-              <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '10px', textAlign: 'center', border: '1px solid #334155' }}>
-                <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>FSM State</div>
-                <div
+              {/* View Switcher Tabs */}
+              <div style={{ display: 'flex', background: '#0f172a', borderRadius: '6px', padding: '0.2rem', border: '1px solid #334155' }}>
+                <button
+                  type="button"
+                  onClick={() => setActiveMetricsTab('live')}
                   style={{
-                    fontSize: '1rem',
-                    fontWeight: 700,
-                    marginTop: '0.75rem',
-                    color:
-                      counterState.state === SQUAT_STATES.BOTTOM
-                        ? '#f59e0b'
-                        : counterState.state === SQUAT_STATES.ASCENDING
-                        ? '#38bdf8'
-                        : counterState.state === SQUAT_STATES.DESCENDING
-                        ? '#a855f7'
-                        : counterState.state === SQUAT_STATES.STANDING
-                        ? '#10b981'
-                        : '#64748b'
+                    padding: '0.3rem 0.65rem',
+                    borderRadius: '4px',
+                    border: 'none',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    backgroundColor: activeMetricsTab === 'live' ? '#0284c7' : 'transparent',
+                    color: activeMetricsTab === 'live' ? '#ffffff' : '#94a3b8'
                   }}
                 >
-                  {counterState.state}
-                </div>
-                <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.2rem' }}>
-                  Side: <strong style={{ color: '#e2e8f0' }}>{counterState.side}</strong>
-                </div>
+                  Live
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveMetricsTab('summary')}
+                  style={{
+                    padding: '0.3rem 0.65rem',
+                    borderRadius: '4px',
+                    border: 'none',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    backgroundColor: activeMetricsTab === 'summary' ? '#0284c7' : 'transparent',
+                    color: activeMetricsTab === 'summary' ? '#ffffff' : '#94a3b8'
+                  }}
+                >
+                  Summary {isAnalysisComplete && '✓'}
+                </button>
               </div>
             </div>
 
-            {/* Live Knee Angle & Depth Gauges */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: '0.75rem',
-                marginBottom: '1rem'
-              }}
-            >
-              <div style={{ background: '#0f172a', padding: '0.85rem', borderRadius: '8px', border: '1px solid #334155' }}>
-                <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>Live Knee Angle</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#f8fafc', marginTop: '0.2rem' }}>
-                  {counterState.currentAngle !== null ? `${counterState.currentAngle}°` : '—'}
-                </div>
-              </div>
+            {/* TAB 1: Live Telemetry & Counter */}
+            {activeMetricsTab === 'live' ? (
+              <div>
+                <p className="card-desc">
+                  Real-time repetition counter and joint angle telemetry during video playback.
+                </p>
 
-              <div style={{ background: '#0f172a', padding: '0.85rem', borderRadius: '8px', border: '1px solid #334155' }}>
-                <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>Best Depth</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 700, color: counterState.bestDepth ? '#34d399' : '#f8fafc', marginTop: '0.2rem' }}>
-                  {counterState.bestDepth ? `${counterState.bestDepth}°` : '—'}
-                </div>
-              </div>
-            </div>
+                {/* Counter & FSM State */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                  <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '10px', textAlign: 'center', border: '1px solid #334155' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Repetitions</div>
+                    <div style={{ fontSize: '3rem', fontWeight: 800, color: '#38bdf8', lineHeight: 1.1, marginTop: '0.35rem' }}>
+                      {counterState.repetitionCount}
+                    </div>
+                  </div>
 
-            {/* Rep History Table */}
-            {counterState.repHistory && counterState.repHistory.length > 0 && (
-              <div style={{ marginBottom: '1rem' }}>
-                <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.4rem' }}>
-                  Completed Repetitions Log
+                  <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '10px', textAlign: 'center', border: '1px solid #334155' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>FSM State</div>
+                    <div
+                      style={{
+                        fontSize: '1rem',
+                        fontWeight: 700,
+                        marginTop: '0.75rem',
+                        color:
+                          counterState.state === SQUAT_STATES.BOTTOM
+                            ? '#f59e0b'
+                            : counterState.state === SQUAT_STATES.ASCENDING
+                            ? '#38bdf8'
+                            : counterState.state === SQUAT_STATES.DESCENDING
+                            ? '#a855f7'
+                            : counterState.state === SQUAT_STATES.STANDING
+                            ? '#10b981'
+                            : '#64748b'
+                      }}
+                    >
+                      {counterState.state}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.2rem' }}>
+                      Side: <strong style={{ color: '#e2e8f0' }}>{counterState.side}</strong>
+                    </div>
+                  </div>
                 </div>
-                <div style={{ maxHeight: '120px', overflowY: 'auto', border: '1px solid #334155', borderRadius: '6px', fontSize: '0.75rem' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                    <thead>
-                      <tr style={{ background: '#0f172a', borderBottom: '1px solid #334155', color: '#94a3b8' }}>
-                        <th style={{ padding: '0.35rem 0.6rem' }}>#</th>
-                        <th style={{ padding: '0.35rem 0.6rem' }}>Bottom Angle</th>
-                        <th style={{ padding: '0.35rem 0.6rem' }}>Side</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {counterState.repHistory.map((rep) => (
-                        <tr key={rep.repNumber} style={{ borderBottom: '1px solid #1e293b' }}>
-                          <td style={{ padding: '0.35rem 0.6rem', fontWeight: 600, color: '#38bdf8' }}>Rep {rep.repNumber}</td>
-                          <td style={{ padding: '0.35rem 0.6rem', color: '#f8fafc' }}>{rep.minAngle}°</td>
-                          <td style={{ padding: '0.35rem 0.6rem', color: '#94a3b8' }}>{rep.side}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+
+                {/* Angle Gauges */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
+                  <div style={{ background: '#0f172a', padding: '0.85rem', borderRadius: '8px', border: '1px solid #334155' }}>
+                    <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>Live Knee Angle</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#f8fafc', marginTop: '0.2rem' }}>
+                      {counterState.currentAngle !== null ? `${counterState.currentAngle}°` : '—'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#0f172a', padding: '0.85rem', borderRadius: '8px', border: '1px solid #334155' }}>
+                    <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>Lowest Depth</div>
+                    <div style={{ fontSize: '1.4rem', fontWeight: 700, color: counterState.bestDepth ? '#34d399' : '#f8fafc', marginTop: '0.2rem' }}>
+                      {counterState.bestDepth ? `${counterState.bestDepth}°` : '—'}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '0.75rem', color: '#64748b', background: 'rgba(15, 23, 42, 0.4)', padding: '0.65rem 0.85rem', borderRadius: '6px', border: '1px dashed #334155' }}>
+                  <div>• <strong>Thresholds:</strong> Standing &ge; 155&deg; &bull; Bottom &le; 100&deg; &bull; Ascent &gt; 115&deg;</div>
+                  <div style={{ marginTop: '0.2rem' }}>• Once video finishes, the Summary report will open automatically.</div>
                 </div>
               </div>
+            ) : (
+              /* TAB 2: Results Dashboard Summary */
+              <ResultsDashboard
+                metrics={sessionSummary}
+                onReplay={handleReplaySession}
+                onReset={handleResetVideo}
+              />
             )}
-
-            {/* Threshold & Coverage Summary */}
-            <div style={{ fontSize: '0.75rem', color: '#64748b', background: 'rgba(15, 23, 42, 0.4)', padding: '0.65rem 0.85rem', borderRadius: '6px', border: '1px dashed #334155' }}>
-              <div>• <strong>Thresholds:</strong> Standing &ge; 155&deg; &bull; Bottom &le; 100&deg; &bull; Ascent &gt; 115&deg;</div>
-              <div style={{ marginTop: '0.2rem' }}>• Partial squats not reaching 100&deg; are excluded from the count.</div>
-            </div>
           </div>
 
-          {/* Phase 8: Gemma 4 AI Summary */}
+          {/* Section 4: Gemma 4 AI Summary (Phase 8 placeholder) */}
           <div className="card">
             <h2 className="card-title">4. AI Session Summary</h2>
             <p className="card-desc">

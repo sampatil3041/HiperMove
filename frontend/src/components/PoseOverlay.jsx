@@ -118,7 +118,8 @@ export default function PoseOverlay({
   resetAnalysisSession,
   analysisStats,
   onPoseUpdate,
-  liveAngleInfo
+  liveAngleInfo,
+  onAnalysisFinished
 }) {
   const containerRef = useRef(null);
   const videoRef = useRef(null);
@@ -251,6 +252,9 @@ export default function PoseOverlay({
     setIsPlaying(false);
     if (animationFrameIdRef.current) {
       cancelAnimationFrame(animationFrameIdRef.current);
+    }
+    if (onAnalysisFinished) {
+      onAnalysisFinished();
     }
   };
 
