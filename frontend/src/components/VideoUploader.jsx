@@ -10,12 +10,13 @@ import React, { useState, useRef } from 'react';
  */
 export default function VideoUploader({ onFileSelected, isValidating, disabled = false }) {
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isLoadingSample, setIsLoadingSample] = useState(false);
   const fileInputRef = useRef(null);
 
   const handleDragOver = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!disabled && !isValidating) {
+    if (!disabled && !isValidating && !isLoadingSample) {
       setIsDragOver(true);
     }
   };
@@ -31,7 +32,7 @@ export default function VideoUploader({ onFileSelected, isValidating, disabled =
     e.stopPropagation();
     setIsDragOver(false);
 
-    if (disabled || isValidating) return;
+    if (disabled || isValidating || isLoadingSample) return;
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
@@ -43,14 +44,34 @@ export default function VideoUploader({ onFileSelected, isValidating, disabled =
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
       onFileSelected(file);
-      // Reset input value so selecting the same file again triggers change event
       e.target.value = '';
     }
   };
 
   const handleClickBrowse = () => {
-    if (!disabled && !isValidating && fileInputRef.current) {
+    if (!disabled && !isValidating && !isLoadingSample && fileInputRef.current) {
       fileInputRef.current.click();
+    }
+  };
+
+  const handleLoadSampleVideo = async (e) => {
+    e.stopPropagation();
+    if (disabled || isValidating || isLoadingSample) return;
+
+    setIsLoadingSample(true);
+    try {
+      const response = await fetch('/samples/squat_sample.webm');
+      if (!response.ok) {
+        throw new Error(`Failed to load sample video (HTTP ${response.status})`);
+      }
+      const blob = await response.blob();
+      const sampleFile = new File([blob], 'sample_squat_demo.webm', { type: 'video/webm' });
+      onFileSelected(sampleFile);
+    } catch (err) {
+      console.error('Error loading sample video:', err);
+      alert(`Could not load sample video: ${err.message}`);
+    } finally {
+      setIsLoadingSample(false);
     }
   };
 
@@ -66,7 +87,7 @@ export default function VideoUploader({ onFileSelected, isValidating, disabled =
         padding: '2.5rem 1.5rem',
         textAlign: 'center',
         backgroundColor: isDragOver ? 'rgba(56, 189, 248, 0.08)' : 'rgba(15, 23, 42, 0.6)',
-        cursor: disabled || isValidating ? 'not-allowed' : 'pointer',
+        cursor: disabled || isValidating || isLoadingSample ? 'not-allowed' : 'pointer',
         transition: 'all 0.2s ease',
         userSelect: 'none'
       }}
@@ -77,7 +98,7 @@ export default function VideoUploader({ onFileSelected, isValidating, disabled =
         accept="video/mp4,video/webm"
         style={{ display: 'none' }}
         onChange={handleFileInputChange}
-        disabled={disabled || isValidating}
+        disabled={disabled || isValidating || isLoadingSample}
       />
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
@@ -93,7 +114,7 @@ export default function VideoUploader({ onFileSelected, isValidating, disabled =
             color: '#38bdf8'
           }}
         >
-          {isValidating ? (
+          {isValidating || isLoadingSample ? (
             <svg
               width="24"
               height="24"
@@ -134,7 +155,11 @@ export default function VideoUploader({ onFileSelected, isValidating, disabled =
 
         <div>
           <div style={{ fontSize: '1rem', fontWeight: 600, color: '#f8fafc' }}>
-            {isValidating ? 'Validating video file...' : 'Choose a video or drag & drop here'}
+            {isValidating
+              ? 'Validating video file...'
+              : isLoadingSample
+              ? 'Loading built-in demo video...'
+              : 'Choose a video or drag & drop here'}
           </div>
           <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '0.35rem' }}>
             Supported: <strong>MP4, WebM</strong> &bull; Max <strong>25 MB</strong> &bull; Max <strong>60 seconds</strong>
@@ -144,28 +169,48 @@ export default function VideoUploader({ onFileSelected, isValidating, disabled =
           </div>
         </div>
 
-        <button
-          type="button"
-          disabled={disabled || isValidating}
-          onClick={(e) => {
-            e.stopPropagation();
-            handleClickBrowse();
-          }}
-          style={{
-            marginTop: '0.5rem',
-            padding: '0.5rem 1.25rem',
-            borderRadius: '6px',
-            backgroundColor: '#0284c7',
-            color: '#ffffff',
-            border: 'none',
-            fontSize: '0.875rem',
-            fontWeight: 500,
-            cursor: disabled || isValidating ? 'not-allowed' : 'pointer',
-            opacity: disabled || isValidating ? 0.6 : 1
-          }}
-        >
-          {isValidating ? 'Checking metadata...' : 'Browse files'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <button
+            type="button"
+            disabled={disabled || isValidating || isLoadingSample}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleClickBrowse();
+            }}
+            style={{
+              padding: '0.5rem 1.25rem',
+              borderRadius: '6px',
+              backgroundColor: '#0284c7',
+              color: '#ffffff',
+              border: 'none',
+              fontSize: '0.875rem',
+              fontWeight: 500,
+              cursor: disabled || isValidating || isLoadingSample ? 'not-allowed' : 'pointer',
+              opacity: disabled || isValidating || isLoadingSample ? 0.6 : 1
+            }}
+          >
+            Browse files
+          </button>
+
+          <button
+            type="button"
+            disabled={disabled || isValidating || isLoadingSample}
+            onClick={handleLoadSampleVideo}
+            style={{
+              padding: '0.5rem 1rem',
+              borderRadius: '6px',
+              backgroundColor: 'rgba(16, 185, 129, 0.15)',
+              color: '#34d399',
+              border: '1px solid rgba(16, 185, 129, 0.4)',
+              fontSize: '0.875rem',
+              fontWeight: 500,
+              cursor: disabled || isValidating || isLoadingSample ? 'not-allowed' : 'pointer',
+              opacity: disabled || isValidating || isLoadingSample ? 0.6 : 1
+            }}
+          >
+            {isLoadingSample ? 'Loading Demo...' : 'Load Demo Squat Video'}
+          </button>
+        </div>
       </div>
 
       <style>{`

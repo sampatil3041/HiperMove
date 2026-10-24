@@ -1,13 +1,30 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getPoseLandmarker, detectPoseOnStaticImage } from '../services/poseLandmarker.js';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  getPoseLandmarker,
+  detectPoseOnStaticImage,
+  detectPoseForVideoFrame,
+  resetVideoTimestamp,
+  drawPoseOnCanvas
+} from '../services/poseLandmarker.js';
 
 /**
- * Custom hook to manage MediaPipe PoseLandmarker lifecycle and static frame analysis
+ * Custom hook to manage MediaPipe PoseLandmarker lifecycle and frame-by-frame analysis
  */
 export function usePoseDetection() {
   const [isModelLoading, setIsModelLoading] = useState(false);
   const [isModelReady, setIsModelReady] = useState(false);
   const [modelError, setModelError] = useState(null);
+
+  // Analysis session statistics
+  const [analysisStats, setAnalysisStats] = useState({
+    totalFrames: 0,
+    framesWithPose: 0,
+    usableRatio: 0,
+    currentFps: 0
+  });
+
+  const lastProcessedTimeRef = useRef(0);
+  const frameCounterRef = useRef({ total: 0, withPose: 0 });
 
   const initModel = useCallback(async () => {
     if (isModelReady || isModelLoading) return;
@@ -32,8 +49,6 @@ export function usePoseDetection() {
 
   /**
    * Run pose detection on a single frame from an HTML video or image element
-   * @param {HTMLVideoElement | HTMLImageElement} sourceElement
-   * @returns {Promise<{ hasPose: boolean, landmarks: Array|null, canvas: HTMLCanvasElement|null }>}
    */
   const detectStaticFrame = useCallback(
     async (sourceElement) => {
@@ -41,12 +56,10 @@ export function usePoseDetection() {
         throw new Error('No media element provided for detection.');
       }
 
-      // Ensure model is ready
       if (!isModelReady) {
         await initModel();
       }
 
-      // Extract frame into a temporary canvas
       const width = sourceElement.videoWidth || sourceElement.naturalWidth || sourceElement.width;
       const height = sourceElement.videoHeight || sourceElement.naturalHeight || sourceElement.height;
 
@@ -60,7 +73,6 @@ export function usePoseDetection() {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(sourceElement, 0, 0, width, height);
 
-      // Perform pose estimation
       const result = await detectPoseOnStaticImage(canvas);
 
       return {
@@ -75,11 +87,68 @@ export function usePoseDetection() {
     [isModelReady, initModel]
   );
 
+  /**
+   * Process a continuous video frame during playback
+   * @param {HTMLVideoElement} videoElement
+   * @param {number} timestampInMs
+   */
+  const detectVideoFrame = useCallback(
+    async (videoElement, timestampInMs) => {
+      if (!videoElement || videoElement.paused || videoElement.ended) {
+        return null;
+      }
+
+      const result = await detectPoseForVideoFrame(videoElement, timestampInMs);
+
+      // Update counters
+      frameCounterRef.current.total += 1;
+      if (result.hasPose) {
+        frameCounterRef.current.withPose += 1;
+      }
+
+      // Calculate stats periodically
+      const now = performance.now();
+      const elapsed = now - lastProcessedTimeRef.current;
+      const currentFps = elapsed > 0 ? Math.round(1000 / elapsed) : 0;
+      lastProcessedTimeRef.current = now;
+
+      const total = frameCounterRef.current.total;
+      const withPose = frameCounterRef.current.withPose;
+      const usableRatio = total > 0 ? withPose / total : 0;
+
+      setAnalysisStats({
+        totalFrames: total,
+        framesWithPose: withPose,
+        usableRatio,
+        currentFps
+      });
+
+      return result;
+    },
+    []
+  );
+
+  const resetAnalysisSession = useCallback(() => {
+    resetVideoTimestamp();
+    frameCounterRef.current = { total: 0, withPose: 0 };
+    lastProcessedTimeRef.current = 0;
+    setAnalysisStats({
+      totalFrames: 0,
+      framesWithPose: 0,
+      usableRatio: 0,
+      currentFps: 0
+    });
+  }, []);
+
   return {
     isModelLoading,
     isModelReady,
     modelError,
     retryInit: initModel,
-    detectStaticFrame
+    detectStaticFrame,
+    detectVideoFrame,
+    resetAnalysisSession,
+    analysisStats,
+    drawPose: drawPoseOnCanvas
   };
 }

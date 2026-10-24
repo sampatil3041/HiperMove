@@ -74,19 +74,29 @@ export const POSE_CONNECTIONS = [
   [POSE_LANDMARKS.RIGHT_ANKLE, POSE_LANDMARKS.RIGHT_FOOT_INDEX]
 ];
 
+let currentRunningMode = 'IMAGE';
+
 /**
  * Initializes and caches the singleton PoseLandmarker instance.
- * @param {'IMAGE' | 'VIDEO'} runningMode - default 'IMAGE' for Phase 3 static tests
+ * @param {'IMAGE' | 'VIDEO'} runningMode - default 'IMAGE'
  * @returns {Promise<PoseLandmarker>}
  */
 export async function getPoseLandmarker(runningMode = 'IMAGE') {
   if (poseLandmarkerInstance) {
-    // If running mode matches, reuse directly
+    if (currentRunningMode !== runningMode) {
+      await poseLandmarkerInstance.setOptions({ runningMode });
+      currentRunningMode = runningMode;
+    }
     return poseLandmarkerInstance;
   }
 
   if (initPromise) {
-    return initPromise;
+    const instance = await initPromise;
+    if (currentRunningMode !== runningMode) {
+      await instance.setOptions({ runningMode });
+      currentRunningMode = runningMode;
+    }
+    return instance;
   }
 
   initPromise = (async () => {
@@ -116,7 +126,6 @@ export async function getPoseLandmarker(runningMode = 'IMAGE') {
     });
 
     try {
-      // Try local model with GPU
       poseLandmarkerInstance = await PoseLandmarker.createFromOptions(vision, createOptions(modelAssetPath, 'GPU'));
     } catch (gpuErr) {
       console.warn('GPU delegate failed, attempting CPU delegate:', gpuErr);
@@ -129,6 +138,7 @@ export async function getPoseLandmarker(runningMode = 'IMAGE') {
       }
     }
 
+    currentRunningMode = runningMode;
     return poseLandmarkerInstance;
   })();
 
@@ -140,6 +150,58 @@ export async function getPoseLandmarker(runningMode = 'IMAGE') {
     poseLandmarkerInstance = null;
     throw new Error(`Failed to initialize MediaPipe Pose Landmarker: ${err.message}`);
   }
+}
+
+let lastVideoTimestamp = -1;
+
+/**
+ * Perform pose detection on a continuous video frame
+ * @param {HTMLVideoElement} videoElement
+ * @param {number} timestampInMs - must be strictly greater than previous timestamp
+ * @returns {Promise<{ hasPose: boolean, landmarks: Array|null, worldLandmarks: Array|null }>}
+ */
+export async function detectPoseForVideoFrame(videoElement, timestampInMs) {
+  const landmarker = await getPoseLandmarker('VIDEO');
+
+  // Ensure timestamp is strictly increasing to satisfy MediaPipe requirements
+  let safeTimestamp = timestampInMs;
+  if (safeTimestamp <= lastVideoTimestamp) {
+    safeTimestamp = lastVideoTimestamp + 1;
+  }
+  lastVideoTimestamp = safeTimestamp;
+
+  try {
+    const result = landmarker.detectForVideo(videoElement, safeTimestamp);
+
+    if (result && result.landmarks && result.landmarks.length > 0) {
+      return {
+        hasPose: true,
+        landmarks: result.landmarks[0],
+        worldLandmarks: result.worldLandmarks ? result.worldLandmarks[0] : null
+      };
+    }
+
+    return {
+      hasPose: false,
+      landmarks: null,
+      worldLandmarks: null
+    };
+  } catch (err) {
+    console.warn('Pose estimation frame error:', err);
+    return {
+      hasPose: false,
+      landmarks: null,
+      worldLandmarks: null,
+      error: err.message
+    };
+  }
+}
+
+/**
+ * Resets the internal timestamp tracker when video is restarted or replaced
+ */
+export function resetVideoTimestamp() {
+  lastVideoTimestamp = -1;
 }
 
 /**

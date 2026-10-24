@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import VideoUploader from './components/VideoUploader.jsx';
 import VideoPreview from './components/VideoPreview.jsx';
 import PoseOverlay from './components/PoseOverlay.jsx';
@@ -13,13 +13,17 @@ export default function App() {
   const [isValidating, setIsValidating] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
 
-  // Video element reference for frame extraction
-  const [videoElement, setVideoElement] = useState(null);
+  // Phase 4: MediaPipe Hook for video processing
+  const {
+    isModelLoading,
+    isModelReady,
+    modelError,
+    detectVideoFrame,
+    resetAnalysisSession,
+    analysisStats
+  } = usePoseDetection();
 
-  // Phase 3: MediaPipe hook and static detection state
-  const { isModelLoading, isModelReady, modelError, detectStaticFrame } = usePoseDetection();
-  const [isDetecting, setIsDetecting] = useState(false);
-  const [detectionResult, setDetectionResult] = useState(null);
+  const [latestPoseResult, setLatestPoseResult] = useState(null);
 
   // Safely release object URLs on unmount or URL replacement
   useEffect(() => {
@@ -33,7 +37,8 @@ export default function App() {
   const handleFileSelected = async (file) => {
     setErrorMessage(null);
     setIsValidating(true);
-    setDetectionResult(null);
+    resetAnalysisSession();
+    setLatestPoseResult(null);
 
     try {
       const result = await loadAndValidateVideoMetadata(file);
@@ -65,29 +70,9 @@ export default function App() {
     setVideoFile(null);
     setVideoMetadata(null);
     setVideoUrl(null);
-    setVideoElement(null);
-    setDetectionResult(null);
+    resetAnalysisSession();
+    setLatestPoseResult(null);
     setErrorMessage(null);
-  };
-
-  const handleRunStaticDetection = async () => {
-    if (!videoElement) {
-      setErrorMessage('Video is not ready yet. Please ensure the video has loaded in the preview.');
-      return;
-    }
-
-    setIsDetecting(true);
-    setErrorMessage(null);
-
-    try {
-      const result = await detectStaticFrame(videoElement);
-      setDetectionResult(result);
-    } catch (err) {
-      console.error('Pose detection error:', err);
-      setErrorMessage(`Pose detection error: ${err.message}`);
-    } finally {
-      setIsDetecting(false);
-    }
   };
 
   return (
@@ -100,7 +85,7 @@ export default function App() {
           </p>
         </div>
         <div>
-          <span className="badge-tag">Phase 3: MediaPipe Pose Landmarker Active</span>
+          <span className="badge-tag">Phase 4: Video-Frame Pose Analysis Active</span>
         </div>
       </header>
 
@@ -114,11 +99,11 @@ export default function App() {
 
       <main className="dashboard-grid">
         <section className="left-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* Phase 2: Video Upload & Preview Component */}
+          {/* Phase 2: Video Upload / Selection */}
           <div className="card">
             <h2 className="card-title">1. Upload Video</h2>
             <p className="card-desc">
-              Upload a short squat video (MP4/WebM, &le; 25MB, &le; 60 seconds).
+              Upload a short squat video or load the built-in demo clip (&le; 25MB, &le; 60s).
             </p>
 
             {!videoUrl ? (
@@ -127,31 +112,81 @@ export default function App() {
                 isValidating={isValidating}
               />
             ) : (
-              <VideoPreview
-                videoUrl={videoUrl}
-                metadata={videoMetadata}
-                onReplaceVideo={handleResetVideo}
-                onVideoElementReady={(el) => setVideoElement(el)}
-              />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div
+                  style={{
+                    background: 'rgba(15, 23, 42, 0.7)',
+                    border: '1px solid #334155',
+                    borderRadius: '8px',
+                    padding: '0.85rem 1rem',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                    gap: '0.75rem',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  <div>
+                    <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>File Name</div>
+                    <div style={{ fontWeight: 500, color: '#f8fafc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={videoMetadata.name}>
+                      {videoMetadata.name}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>Duration</div>
+                    <div style={{ fontWeight: 600, color: '#38bdf8' }}>{videoMetadata.durationFormatted}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>Size</div>
+                    <div style={{ fontWeight: 500, color: '#f8fafc' }}>{videoMetadata.sizeFormatted}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>Resolution</div>
+                    <div style={{ fontWeight: 500, color: '#f8fafc' }}>{videoMetadata.width} &times; {videoMetadata.height}</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={handleResetVideo}
+                    style={{
+                      padding: '0.45rem 0.9rem',
+                      backgroundColor: 'transparent',
+                      border: '1px solid #475569',
+                      color: '#cbd5e1',
+                      borderRadius: '6px',
+                      fontSize: '0.825rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    &larr; Choose Different Video
+                  </button>
+                  <span style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 500 }}>
+                    &#10003; Video loaded
+                  </span>
+                </div>
+              </div>
             )}
           </div>
 
-          {/* Phase 3 & 4: Pose Detection & Video Canvas View */}
+          {/* Phase 3 & 4: Synchronized Video Player & Pose Analysis */}
           <div className="card">
             <h2 className="card-title">2. Pose Estimation & Video Analysis</h2>
             <p className="card-desc">
-              MediaPipe Pose Landmarker estimates 33 body landmarks on sampled frames.
+              Synchronized skeletal overlay tracking body landmarks across continuous video frames.
             </p>
 
             {videoUrl ? (
               <PoseOverlay
-                detectionResult={detectionResult}
-                isModelLoading={isModelLoading}
+                videoUrl={videoUrl}
+                videoMetadata={videoMetadata}
                 isModelReady={isModelReady}
+                isModelLoading={isModelLoading}
                 modelError={modelError}
-                onRunStaticDetection={handleRunStaticDetection}
-                isDetecting={isDetecting}
-                onClearStaticTest={() => setDetectionResult(null)}
+                detectVideoFrame={detectVideoFrame}
+                resetAnalysisSession={resetAnalysisSession}
+                analysisStats={analysisStats}
+                onPoseUpdate={(result) => setLatestPoseResult(result)}
               />
             ) : (
               <div className="placeholder-box">
@@ -171,7 +206,7 @@ export default function App() {
                   <line x1="17" y1="2" x2="17" y2="22" />
                   <line x1="2" y1="12" x2="22" y2="12" />
                 </svg>
-                <p>Upload a video above to run MediaPipe landmark estimation on a frame.</p>
+                <p>Upload a video or click "Load Demo Squat Video" to begin synchronized pose analysis.</p>
               </div>
             )}
           </div>
@@ -190,14 +225,32 @@ export default function App() {
                 <div style={{ fontSize: '2.5rem', fontWeight: 700, color: '#38bdf8', marginTop: '0.25rem' }}>0</div>
               </div>
               <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '8px', textAlign: 'center', border: '1px solid #334155' }}>
-                <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>State</div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 600, color: '#94a3b8', marginTop: '0.75rem' }}>
-                  {detectionResult?.hasPose ? 'LANDMARKS READY' : videoUrl ? 'READY' : 'IDLE'}
+                <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tracking State</div>
+                <div style={{ fontSize: '1rem', fontWeight: 600, color: analysisStats.framesWithPose > 0 ? '#34d399' : '#94a3b8', marginTop: '0.9rem' }}>
+                  {analysisStats.framesWithPose > 0 ? 'ACTIVE POSE' : videoUrl ? 'READY' : 'IDLE'}
                 </div>
               </div>
             </div>
-            <p style={{ fontSize: '0.8rem', color: '#64748b', textAlign: 'center' }}>
-              Finite state machine counter will be integrated in Phase 5.
+
+            <div style={{ fontSize: '0.8rem', color: '#94a3b8', background: '#0f172a', padding: '0.85rem', borderRadius: '6px', border: '1px solid #334155' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                <span>Analyzed Frames:</span>
+                <strong>{analysisStats.totalFrames}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                <span>Frames with Valid Pose:</span>
+                <strong style={{ color: '#34d399' }}>{analysisStats.framesWithPose}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Usable Landmark Coverage:</span>
+                <strong style={{ color: analysisStats.usableRatio > 0.8 ? '#34d399' : '#fbbf24' }}>
+                  {(analysisStats.usableRatio * 100).toFixed(0)}%
+                </strong>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.8rem', color: '#64748b', textAlign: 'center', marginTop: '0.75rem' }}>
+              Phase 5 deterministic squat counting algorithm will hook directly into these landmark frames.
             </p>
           </div>
 
