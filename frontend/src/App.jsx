@@ -1,6 +1,63 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import VideoUploader from './components/VideoUploader.jsx';
+import VideoPreview from './components/VideoPreview.jsx';
+import StatusMessage from './components/StatusMessage.jsx';
+import { loadAndValidateVideoMetadata } from './utils/videoValidation.js';
 
 export default function App() {
+  const [videoFile, setVideoFile] = useState(null);
+  const [videoMetadata, setVideoMetadata] = useState(null);
+  const [videoUrl, setVideoUrl] = useState(null);
+  const [isValidating, setIsValidating] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(null);
+
+  // Safely release object URLs on unmount or URL replacement
+  useEffect(() => {
+    return () => {
+      if (videoUrl) {
+        URL.revokeObjectURL(videoUrl);
+      }
+    };
+  }, [videoUrl]);
+
+  const handleFileSelected = async (file) => {
+    setErrorMessage(null);
+    setIsValidating(true);
+
+    try {
+      const result = await loadAndValidateVideoMetadata(file);
+
+      if (!result.isValid) {
+        setErrorMessage(result.error || 'Video validation failed.');
+        setIsValidating(false);
+        return;
+      }
+
+      // If there was an existing videoUrl, revoke it before setting new one
+      if (videoUrl) {
+        URL.revokeObjectURL(videoUrl);
+      }
+
+      setVideoFile(file);
+      setVideoMetadata(result.metadata);
+      setVideoUrl(result.objectUrl);
+    } catch (err) {
+      setErrorMessage(`Unexpected error during validation: ${err.message}`);
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  const handleResetVideo = () => {
+    if (videoUrl) {
+      URL.revokeObjectURL(videoUrl);
+    }
+    setVideoFile(null);
+    setVideoMetadata(null);
+    setVideoUrl(null);
+    setErrorMessage(null);
+  };
+
   return (
     <div className="app-container">
       <header className="app-header">
@@ -11,9 +68,17 @@ export default function App() {
           </p>
         </div>
         <div>
-          <span className="badge-tag">Phase 1: Project Scaffold Active</span>
+          <span className="badge-tag">Phase 2: Video Loading & Validation</span>
         </div>
       </header>
+
+      {errorMessage && (
+        <StatusMessage
+          type="error"
+          message={errorMessage}
+          onDismiss={() => setErrorMessage(null)}
+        />
+      )}
 
       <main className="dashboard-grid">
         <section className="left-panel" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -23,14 +88,19 @@ export default function App() {
             <p className="card-desc">
               Upload a short squat video (MP4/WebM, &le; 25MB, &le; 60 seconds).
             </p>
-            <div className="placeholder-box">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto', color: '#64748b' }}>
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="17 8 12 3 7 8" />
-                <line x1="12" y1="3" x2="12" y2="15" />
-              </svg>
-              <p>Video uploader and preview will be implemented in Phase 2.</p>
-            </div>
+
+            {!videoUrl ? (
+              <VideoUploader
+                onFileSelected={handleFileSelected}
+                isValidating={isValidating}
+              />
+            ) : (
+              <VideoPreview
+                videoUrl={videoUrl}
+                metadata={videoMetadata}
+                onReplaceVideo={handleResetVideo}
+              />
+            )}
           </div>
 
           {/* Phase 3 & 4: Pose Detection & Video Canvas View */}
@@ -40,7 +110,17 @@ export default function App() {
               MediaPipe Pose Landmarker estimates 33 body landmarks on sampled frames.
             </p>
             <div className="placeholder-box">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto', color: '#64748b' }}>
+              <svg
+                width="40"
+                height="40"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ margin: '0 auto', color: '#64748b' }}
+              >
                 <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
                 <line x1="7" y1="2" x2="7" y2="22" />
                 <line x1="17" y1="2" x2="17" y2="22" />
@@ -50,7 +130,11 @@ export default function App() {
                 <line x1="17" y1="17" x2="22" y2="17" />
                 <line x1="17" y1="7" x2="22" y2="7" />
               </svg>
-              <p>Synchronized video & pose canvas overlay will be implemented in Phases 3 and 4.</p>
+              <p>
+                {videoUrl
+                  ? 'Video loaded and ready for Phase 3 (MediaPipe Landmarker integration).'
+                  : 'Synchronized video & pose canvas overlay will be implemented in Phases 3 and 4.'}
+              </p>
             </div>
           </div>
         </section>
@@ -69,7 +153,9 @@ export default function App() {
               </div>
               <div style={{ background: '#0f172a', padding: '1.25rem', borderRadius: '8px', textAlign: 'center', border: '1px solid #334155' }}>
                 <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>State</div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 600, color: '#94a3b8', marginTop: '0.75rem' }}>IDLE</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 600, color: '#94a3b8', marginTop: '0.75rem' }}>
+                  {videoUrl ? 'READY' : 'IDLE'}
+                </div>
               </div>
             </div>
             <p style={{ fontSize: '0.8rem', color: '#64748b', textAlign: 'center' }}>
