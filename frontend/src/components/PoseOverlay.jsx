@@ -2,9 +2,9 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { POSE_CONNECTIONS, POSE_LANDMARKS } from '../services/poseLandmarker.js';
 
 /**
- * Draws landmarks and skeletal connections with letterbox-aware projection
+ * Draws landmarks and skeletal connections with letterbox-aware projection and live angle HUD
  */
-function drawAlignedPose(ctx, landmarks, displayWidth, displayHeight, videoWidth, videoHeight) {
+function drawAlignedPose(ctx, landmarks, displayWidth, displayHeight, videoWidth, videoHeight, liveAngleInfo) {
   if (!landmarks || landmarks.length === 0 || !videoWidth || !videoHeight) return;
 
   // Calculate letterboxing / object-fit: contain offsets
@@ -78,6 +78,30 @@ function drawAlignedPose(ctx, landmarks, displayWidth, displayHeight, videoWidth
     ctx.stroke();
   }
 
+  // 3. Render live knee angle badge near the primary knee
+  if (liveAngleInfo && liveAngleInfo.angle !== null && liveAngleInfo.side !== 'unknown') {
+    const kneeIndex = liveAngleInfo.side === 'left' ? POSE_LANDMARKS.LEFT_KNEE : POSE_LANDMARKS.RIGHT_KNEE;
+    const knee = landmarks[kneeIndex];
+
+    if (knee) {
+      const kx = toScreenX(knee.x) + 12;
+      const ky = toScreenY(knee.y) - 6;
+      const angleText = `${liveAngleInfo.angle}°`;
+
+      ctx.font = 'bold 13px -apple-system, sans-serif';
+      const textWidth = ctx.measureText(angleText).width;
+
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+      ctx.fillRect(kx - 4, ky - 14, textWidth + 8, 20);
+      ctx.strokeStyle = liveAngleInfo.angle <= 100 ? '#f59e0b' : '#34d399';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(kx - 4, ky - 14, textWidth + 8, 20);
+
+      ctx.fillStyle = liveAngleInfo.angle <= 100 ? '#fbbf24' : '#f8fafc';
+      ctx.fillText(angleText, kx, ky);
+    }
+  }
+
   ctx.restore();
 }
 
@@ -93,7 +117,8 @@ export default function PoseOverlay({
   detectVideoFrame,
   resetAnalysisSession,
   analysisStats,
-  onPoseUpdate
+  onPoseUpdate,
+  liveAngleInfo
 }) {
   const containerRef = useRef(null);
   const videoRef = useRef(null);
@@ -164,7 +189,8 @@ export default function PoseOverlay({
                 canvas.width,
                 canvas.height,
                 video.videoWidth,
-                video.videoHeight
+                video.videoHeight,
+                liveAngleInfo
               );
             }
           })
