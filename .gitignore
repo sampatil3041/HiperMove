@@ -15,7 +15,7 @@ backend/dist/
 .DS_Store
 
 # MediaPipe WASM cache
-frontend/public/wasm/
+
 
 # Logs
 *.log
