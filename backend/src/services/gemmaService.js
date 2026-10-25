@@ -1,163 +1,383 @@
+
 import { GoogleGenAI } from '@google/genai';
 
 /**
- * Service to generate plain-language movement session summaries using Gemma / Gemini API.
- * Follows strict PRD guidelines:
- * - Summarizes ONLY the supplied metrics
- * - Prohibits medical diagnoses, injury claims, or invented repetitions
- * - Transparently distinguishes real Gemma responses from local test mocks
+ * HiperMove AI Summary Service
+ *
+ * Features:
+ * 1. Generates summaries using the configured Google AI model.
+ * 2. Retries temporary API errors with exponential backoff.
+ * 3. Optionally tries a second model if configured.
+ * 4. Returns a local metric-based summary if AI remains unavailable.
+ *
+ * Important:
+ * Local summaries are clearly labeled and are not presented as AI-generated.
  */
 
 const DEFAULT_MODEL = process.env.GEMINI_MODEL || 'gemma-4-31b-it';
+const FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || '';
+
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 1000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function getErrorMessage(error) {
+  if (typeof error?.message === 'string') {
+    return error.message;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function isTemporaryError(error) {
+  const message = getErrorMessage(error).toUpperCase();
+
+  return (
+    message.includes('503') ||
+    message.includes('UNAVAILABLE') ||
+    message.includes('429') ||
+    message.includes('RESOURCE_EXHAUSTED') ||
+    message.includes('500') ||
+    message.includes('502') ||
+    message.includes('504') ||
+    message.includes('INTERNAL')
+  );
+}
+
+function isModelError(error) {
+  const message = getErrorMessage(error).toLowerCase();
+
+  return (
+    message.includes('not found') ||
+    message.includes('not supported') ||
+    message.includes('invalid model') ||
+    message.includes('unknown model')
+  );
+}
 
 /**
- * Generates local clearly-labeled mock summary when GEMINI_API_KEY is not configured
+ * Extract text from a Google GenAI response.
  */
-function generateLocalMockSummary(metrics) {
-  const {
-    repetitionCount,
-    videoDurationSeconds,
-    usableFrameRatio,
-    avgDepthDegrees,
-    bestDepthDegrees
-  } = metrics;
+function extractResponseText(response) {
+  if (typeof response?.text === 'string' && response.text.trim()) {
+    return response.text.trim();
+  }
 
-  const coveragePercent = Math.round((usableFrameRatio || 0) * 100);
+  const parts = response?.candidates?.[0]?.content?.parts;
 
-  let depthText = 'No depth data was recorded.';
-  if (bestDepthDegrees !== null) {
-    if (bestDepthDegrees <= 90) {
-      depthText = `Deep/parallel squat depth was reached with a lowest recorded knee flexion angle of ${bestDepthDegrees}°.`;
-    } else if (bestDepthDegrees <= 100) {
-      depthText = `Standard squat depth was reached with a lowest knee flexion angle of ${bestDepthDegrees}°.`;
-    } else {
-      depthText = `Lowest knee flexion recorded was ${bestDepthDegrees}°.`;
+  if (Array.isArray(parts)) {
+    return parts
+      .map((part) => part?.text || '')
+      .join('\n')
+      .trim();
+  }
+
+  return '';
+}
+
+/**
+ * Retry temporary failures using exponential backoff.
+ */
+async function generateWithRetry(ai, model, prompt, attempts = MAX_RETRIES) {
+  let lastError;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          temperature: 0.2,
+          maxOutputTokens: 180,
+        },
+      });
+
+      const text = extractResponseText(response);
+
+      if (!text) {
+        const finishReason =
+          response?.candidates?.[0]?.finishReason || 'UNKNOWN';
+
+        throw new Error(
+          `The AI model returned no summary text. Finish reason: ${finishReason}`
+        );
+      }
+
+      return text;
+    } catch (error) {
+      lastError = error;
+
+      const canRetry =
+        isTemporaryError(error) &&
+        attempt < attempts - 1;
+
+      if (!canRetry) {
+        throw error;
+      }
+
+      const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+
+      console.warn(
+        `[HiperMove] ${model} request failed. ` +
+        `Retrying in ${delay}ms (${attempt + 1}/${attempts - 1}).`
+      );
+
+      await sleep(delay);
     }
   }
 
-  let repsText = '';
-  if (repetitionCount === 0) {
-    repsText = `Zero completed repetitions were detected over the ${videoDurationSeconds}s clip.`;
-  } else if (repetitionCount === 1) {
-    repsText = `1 completed squat repetition was measured over the ${videoDurationSeconds}s clip.`;
+  throw lastError;
+}
+
+/**
+ * Local summary used when the API key is missing or AI generation fails.
+ * It uses only the supplied session metrics.
+ */
+function generateLocalSummary(metrics, reason = 'AI service unavailable') {
+  const {
+    exerciseType = 'squat',
+    repetitionCount = 0,
+    videoDurationSeconds = 0,
+    usableFrameRatio = 0,
+    avgDepthDegrees = null,
+    bestDepthDegrees = null,
+  } = metrics || {};
+
+  const safeReps =
+    Number.isFinite(repetitionCount) && repetitionCount >= 0
+      ? repetitionCount
+      : 0;
+
+  const safeDuration =
+    Number.isFinite(videoDurationSeconds) && videoDurationSeconds >= 0
+      ? videoDurationSeconds
+      : 0;
+
+  const safeCoverage =
+    Number.isFinite(usableFrameRatio)
+      ? Math.max(0, Math.min(1, usableFrameRatio))
+      : 0;
+
+  const coveragePercent = Math.round(safeCoverage * 100);
+
+  let repsText;
+
+  if (safeReps === 0) {
+    repsText =
+      `No completed squat repetitions were detected in the ` +
+      `${safeDuration}-second clip.`;
+  } else if (safeReps === 1) {
+    repsText =
+      `1 completed squat repetition was detected in the ` +
+      `${safeDuration}-second clip.`;
   } else {
-    repsText = `${repetitionCount} completed squat repetitions were measured over the ${videoDurationSeconds}s clip.`;
+    repsText =
+      `${safeReps} completed squat repetitions were detected in the ` +
+      `${safeDuration}-second clip.`;
   }
+
+  let depthText = 'A reliable squat depth measurement was not available.';
+
+  if (Number.isFinite(bestDepthDegrees)) {
+    if (bestDepthDegrees <= 90) {
+      depthText =
+        `The lowest recorded knee flexion angle was ` +
+        `${bestDepthDegrees}°, within the deep/parallel range used by this prototype.`;
+    } else if (bestDepthDegrees <= 100) {
+      depthText =
+        `The lowest recorded knee flexion angle was ` +
+        `${bestDepthDegrees}°, within the standard depth range used by this prototype.`;
+    } else {
+      depthText =
+        `The lowest recorded knee flexion angle was ${bestDepthDegrees}°.`;
+    }
+  }
+
+  let averageText = '';
+
+  if (Number.isFinite(avgDepthDegrees)) {
+    averageText =
+      ` The average bottom knee flexion angle was ${avgDepthDegrees}°.`;
+  }
+
+  const summary =
+    `${repsText} ${depthText}${averageText} ` +
+    `Usable landmark coverage was ${coveragePercent}%. ` +
+    `Camera angle, lighting, and clothing can affect video-based estimates.`;
 
   return {
-    source: 'mock_demo',
+    source: 'local_fallback',
+    model: null,
     isMock: true,
-    notice: 'DEMO MOCK SUMMARY: GEMINI_API_KEY is not configured in backend/.env. This summary was generated locally for UI testing and was NOT produced by Gemma.',
-    summary: `${repsText} ${depthText} Usable landmark coverage was ${coveragePercent}%. Movement showed consistent joint visibility during the recorded frames.`,
+    notice:
+      `AI-generated summary was unavailable (${reason}). ` +
+      'This summary was generated locally from measured session metrics.',
+    summary,
     metricsSupplied: {
-      repetitionCount,
-      videoDurationSeconds,
-      avgDepthDegrees,
-      bestDepthDegrees,
-      usableFrameRatio
-    }
+      exerciseType,
+      repetitionCount: safeReps,
+      videoDurationSeconds: safeDuration,
+      avgDepthDegrees: Number.isFinite(avgDepthDegrees)
+        ? avgDepthDegrees
+        : null,
+      bestDepthDegrees: Number.isFinite(bestDepthDegrees)
+        ? bestDepthDegrees
+        : null,
+      usableFrameRatio: safeCoverage,
+    },
   };
 }
 
 /**
- * Generates AI session summary using Gemma through Gemini API
- * @param {object} metrics
+ * Build a concise prompt using only measured session metrics.
+ */
+function buildPrompt(metrics) {
+  const {
+    exerciseType = 'squat',
+    repetitionCount = 0,
+    videoDurationSeconds = 0,
+    usableFrameRatio = 0,
+    avgDepthDegrees = null,
+    bestDepthDegrees = null,
+    repHistory = [],
+  } = metrics;
+
+  const coveragePercent = Math.round(
+    (Number.isFinite(usableFrameRatio) ? usableFrameRatio : 0) * 100
+  );
+
+  // Limit prompt size if a long repetition history is provided.
+  const recentReps = Array.isArray(repHistory)
+    ? repHistory.slice(-10)
+    : [];
+
+  return `
+You are a careful movement-analysis assistant for the HiperMove prototype.
+
+Write a concise summary of the user's measured squat session in 2-3 sentences.
+
+MEASURED SESSION METRICS:
+- Exercise: ${exerciseType}
+- Completed repetitions: ${repetitionCount}
+- Video duration: ${videoDurationSeconds} seconds
+- Usable landmark coverage: ${coveragePercent}%
+- Average bottom knee flexion angle: ${
+    Number.isFinite(avgDepthDegrees) ? `${avgDepthDegrees} degrees` : 'N/A'
+  }
+- Lowest recorded knee flexion angle: ${
+    Number.isFinite(bestDepthDegrees) ? `${bestDepthDegrees} degrees` : 'N/A'
+  }
+- Recent repetition history: ${JSON.stringify(recentReps)}
+
+STRICT RULES:
+1. Use only the supplied metrics.
+2. Do not invent repetitions, angles, calories, heart rate, or other measurements.
+3. Do not diagnose medical conditions or claim that the user is injured.
+4. Do not make unsupported claims about form or movement consistency.
+5. Keep the response objective, encouraging, and under 3 sentences.
+6. Mention that camera angle, lighting, and clothing may affect estimates.
+7. Return plain text without markdown headings.
+`.trim();
+}
+
+/**
+ * Generate a session summary.
+ *
+ * @param {object} metrics - Calculated squat metrics from the backend.
  * @returns {Promise<object>}
  */
 export async function generateSessionSummary(metrics) {
+  const safeMetrics = metrics || {};
   const apiKey = process.env.GEMINI_API_KEY;
 
-  // If no API key is provided, return clearly labelled mock summary
   if (!apiKey || apiKey === 'your_gemini_api_key_here') {
-    return generateLocalMockSummary(metrics);
+    return generateLocalSummary(
+      safeMetrics,
+      'GEMINI_API_KEY is not configured'
+    );
   }
 
-  const {
-    exerciseType,
-    repetitionCount,
-    videoDurationSeconds,
-    usableFrameRatio,
-    avgDepthDegrees,
-    bestDepthDegrees,
-    repHistory
-  } = metrics;
-
-  const coveragePercent = Math.round((usableFrameRatio || 0) * 100);
-
-  const prompt = `You are a careful movement and mobility assistant for the HiperMove prototype.
-Your task is to summarize the following measured squat exercise session in 2 to 3 concise, objective sentences.
-
-MEASURED SESSION METRICS:
-- Exercise Type: ${exerciseType}
-- Completed Repetitions: ${repetitionCount}
-- Video Duration: ${videoDurationSeconds} seconds
-- Landmark Usability Coverage: ${coveragePercent}% of frames
-- Average Bottom Knee Flexion Angle: ${avgDepthDegrees !== null ? `${avgDepthDegrees}°` : 'N/A'}
-- Deepest Knee Flexion Angle: ${bestDepthDegrees !== null ? `${bestDepthDegrees}°` : 'N/A'}
-- Individual Reps: ${JSON.stringify(repHistory || [])}
-
-STRICT INSTRUCTIONS:
-1. Base your explanation strictly on the provided numbers.
-2. Do NOT invent repetitions, angles, calories, heart rates, injury risks, or medical diagnoses.
-3. Do NOT make professional clinical claims or rehabilitation prescriptions.
-4. Keep the tone encouraging, factual, and concise (maximum 3 sentences).
-5. Conclude with a reminder that camera angle and clothing can influence video landmark estimates.`;
+  const ai = new GoogleGenAI({ apiKey });
+  const primaryModel = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+  const prompt = buildPrompt(safeMetrics);
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt
-    });
-
-    const summaryText = response.text ? response.text.trim() : 'Summary could not be generated.';
+    // First attempt: configured primary model with automatic retries.
+    const summary = await generateWithRetry(ai, primaryModel, prompt);
 
     return {
       source: 'gemma',
-      model,
+      model: primaryModel,
       isMock: false,
-      summary: summaryText,
+      summary,
       metricsSupplied: {
-        repetitionCount,
-        videoDurationSeconds,
-        avgDepthDegrees,
-        bestDepthDegrees,
-        usableFrameRatio
-      }
+        repetitionCount: safeMetrics.repetitionCount,
+        videoDurationSeconds: safeMetrics.videoDurationSeconds,
+        avgDepthDegrees: safeMetrics.avgDepthDegrees ?? null,
+        bestDepthDegrees: safeMetrics.bestDepthDegrees ?? null,
+        usableFrameRatio: safeMetrics.usableFrameRatio,
+      },
     };
-  } catch (err) {
-    console.error('Google GenAI Error:', err.message);
+  } catch (primaryError) {
+    console.error(
+      `[HiperMove] Primary model "${primaryModel}" failed:`,
+      getErrorMessage(primaryError)
+    );
 
-    // If the specific model ID failed, check if we can fall back to standard gemini flash model
-    if (err.message && err.message.includes('not found') && process.env.GEMINI_MODEL !== 'gemini-1.5-flash') {
+    // Second attempt: optional model configured in backend/.env.
+    if (
+      FALLBACK_MODEL &&
+      FALLBACK_MODEL !== primaryModel
+    ) {
       try {
-        console.warn('Retrying with gemini-1.5-flash fallback...');
-        const ai = new GoogleGenAI({ apiKey });
-        const fallbackResponse = await ai.models.generateContent({
-          model: 'gemini-1.5-flash',
-          contents: prompt
-        });
+        console.warn(
+          `[HiperMove] Trying configured fallback model "${FALLBACK_MODEL}".`
+        );
+
+        const summary = await generateWithRetry(
+          ai,
+          FALLBACK_MODEL,
+          prompt,
+          2
+        );
 
         return {
           source: 'gemini_fallback',
-          model: 'gemini-1.5-flash',
+          model: FALLBACK_MODEL,
           isMock: false,
-          summary: fallbackResponse.text.trim(),
+          summary,
           metricsSupplied: {
-            repetitionCount,
-            videoDurationSeconds,
-            avgDepthDegrees,
-            bestDepthDegrees,
-            usableFrameRatio
-          }
+            repetitionCount: safeMetrics.repetitionCount,
+            videoDurationSeconds: safeMetrics.videoDurationSeconds,
+            avgDepthDegrees: safeMetrics.avgDepthDegrees ?? null,
+            bestDepthDegrees: safeMetrics.bestDepthDegrees ?? null,
+            usableFrameRatio: safeMetrics.usableFrameRatio,
+          },
         };
-      } catch (fallbackErr) {
-        console.error('Fallback model also failed:', fallbackErr.message);
+      } catch (fallbackError) {
+        console.error(
+          `[HiperMove] Fallback model "${FALLBACK_MODEL}" failed:`,
+          getErrorMessage(fallbackError)
+        );
       }
     }
 
-    throw new Error(`AI Summary service error: ${err.message}`);
+    // Final fallback: keep the summary feature usable without the AI API.
+    const reason = isModelError(primaryError)
+      ? 'configured AI model is unavailable or unsupported'
+      : isTemporaryError(primaryError)
+        ? 'Google AI service is temporarily unavailable'
+        : 'AI summary generation failed';
+
+    console.warn(
+      '[HiperMove] Returning a local metric-based summary.'
+    );
+
+    return generateLocalSummary(safeMetrics, reason);
   }
 }

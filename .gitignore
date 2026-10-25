@@ -1,10 +1,24 @@
-# Root .gitignore for HiperMove
+# Dependencies
 node_modules/
-dist/
-.DS_Store
-.env
-.env.local
-.env.*.local
 
-# MediaPipe binary wasm cache
+# Build output
+dist/
+frontend/dist/
+backend/dist/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# MediaPipe WASM cache
 frontend/public/wasm/
+
+# Logs
+*.log
+
+# Local editor settings
+.vscode/

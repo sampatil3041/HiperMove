@@ -2,12 +2,12 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { POSE_CONNECTIONS, POSE_LANDMARKS } from '../services/poseLandmarker.js';
 
 /**
- * Draws landmarks and skeletal connections with letterbox-aware projection and live angle HUD
+ * Draws landmarks and skeletal connections with letterbox-aware projection
+ * and a live angle HUD.
  */
 function drawAlignedPose(ctx, landmarks, displayWidth, displayHeight, videoWidth, videoHeight, liveAngleInfo) {
   if (!landmarks || landmarks.length === 0 || !videoWidth || !videoHeight) return;
 
-  // Calculate letterboxing / object-fit: contain offsets
   const videoAspect = videoWidth / videoHeight;
   const displayAspect = displayWidth / displayHeight;
 
@@ -17,12 +17,10 @@ function drawAlignedPose(ctx, landmarks, displayWidth, displayHeight, videoWidth
   let offsetY = 0;
 
   if (displayAspect > videoAspect) {
-    // Letterbox on left/right
     renderHeight = displayHeight;
     renderWidth = displayHeight * videoAspect;
     offsetX = (displayWidth - renderWidth) / 2;
   } else {
-    // Letterbox on top/bottom
     renderWidth = displayWidth;
     renderHeight = displayWidth / videoAspect;
     offsetY = (displayHeight - renderHeight) / 2;
@@ -34,19 +32,22 @@ function drawAlignedPose(ctx, landmarks, displayWidth, displayHeight, videoWidth
   ctx.save();
   ctx.lineWidth = 3;
 
-  // 1. Draw connections
+  // Draw skeletal connections.
   for (const [startIndex, endIndex] of POSE_CONNECTIONS) {
     const start = landmarks[startIndex];
     const end = landmarks[endIndex];
 
     if (!start || !end) continue;
-    if ((start.visibility !== undefined && start.visibility < 0.3) ||
-        (end.visibility !== undefined && end.visibility < 0.3)) {
+
+    if (
+      (start.visibility !== undefined && start.visibility < 0.3) ||
+      (end.visibility !== undefined && end.visibility < 0.3)
+    ) {
       continue;
     }
 
-    const isLeg = (startIndex >= 23 && endIndex >= 23);
-    ctx.strokeStyle = isLeg ? '#10b981' : '#38bdf8'; // Emerald for legs, sky blue for arms/torso
+    const isLeg = startIndex >= 23 && endIndex >= 23;
+    ctx.strokeStyle = isLeg ? '#16c79a' : '#62a0ff';
 
     ctx.beginPath();
     ctx.moveTo(toScreenX(start.x), toScreenY(start.y));
@@ -54,7 +55,7 @@ function drawAlignedPose(ctx, landmarks, displayWidth, displayHeight, videoWidth
     ctx.stroke();
   }
 
-  // 2. Draw joints
+  // Draw body joints.
   for (let i = 0; i < landmarks.length; i++) {
     const lm = landmarks[i];
     if (!lm) continue;
@@ -63,24 +64,31 @@ function drawAlignedPose(ctx, landmarks, displayWidth, displayHeight, videoWidth
     const x = toScreenX(lm.x);
     const y = toScreenY(lm.y);
 
-    const isSquatJoint = (
-      i === POSE_LANDMARKS.LEFT_HIP || i === POSE_LANDMARKS.RIGHT_HIP ||
-      i === POSE_LANDMARKS.LEFT_KNEE || i === POSE_LANDMARKS.RIGHT_KNEE ||
-      i === POSE_LANDMARKS.LEFT_ANKLE || i === POSE_LANDMARKS.RIGHT_ANKLE
-    );
+    const isSquatJoint =
+      i === POSE_LANDMARKS.LEFT_HIP ||
+      i === POSE_LANDMARKS.RIGHT_HIP ||
+      i === POSE_LANDMARKS.LEFT_KNEE ||
+      i === POSE_LANDMARKS.RIGHT_KNEE ||
+      i === POSE_LANDMARKS.LEFT_ANKLE ||
+      i === POSE_LANDMARKS.RIGHT_ANKLE;
 
     ctx.beginPath();
     ctx.arc(x, y, isSquatJoint ? 6 : 4, 0, 2 * Math.PI);
-    ctx.fillStyle = isSquatJoint ? '#f59e0b' : '#38bdf8';
+    ctx.fillStyle = isSquatJoint ? '#ffbd59' : '#8bc5ff';
     ctx.fill();
+
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.5;
     ctx.stroke();
   }
 
-  // 3. Render live knee angle badge near the primary knee
+  // Display the live knee angle near the selected knee.
   if (liveAngleInfo && liveAngleInfo.angle !== null && liveAngleInfo.side !== 'unknown') {
-    const kneeIndex = liveAngleInfo.side === 'left' ? POSE_LANDMARKS.LEFT_KNEE : POSE_LANDMARKS.RIGHT_KNEE;
+    const kneeIndex =
+      liveAngleInfo.side === 'left'
+        ? POSE_LANDMARKS.LEFT_KNEE
+        : POSE_LANDMARKS.RIGHT_KNEE;
+
     const knee = landmarks[kneeIndex];
 
     if (knee) {
@@ -91,13 +99,14 @@ function drawAlignedPose(ctx, landmarks, displayWidth, displayHeight, videoWidth
       ctx.font = 'bold 13px -apple-system, sans-serif';
       const textWidth = ctx.measureText(angleText).width;
 
-      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.94)';
       ctx.fillRect(kx - 4, ky - 14, textWidth + 8, 20);
-      ctx.strokeStyle = liveAngleInfo.angle <= 100 ? '#f59e0b' : '#34d399';
+
+      ctx.strokeStyle = liveAngleInfo.angle <= 100 ? '#e5a02c' : '#16a779';
       ctx.lineWidth = 1;
       ctx.strokeRect(kx - 4, ky - 14, textWidth + 8, 20);
 
-      ctx.fillStyle = liveAngleInfo.angle <= 100 ? '#fbbf24' : '#f8fafc';
+      ctx.fillStyle = liveAngleInfo.angle <= 100 ? '#9a6413' : '#087b5b';
       ctx.fillText(angleText, kx, ky);
     }
   }
@@ -106,7 +115,7 @@ function drawAlignedPose(ctx, landmarks, displayWidth, displayHeight, videoWidth
 }
 
 /**
- * Continuous Video-Frame Pose Analysis Player with Aligned Overlay
+ * Continuous Video-Frame Pose Analysis Player with Aligned Overlay.
  */
 export default function PoseOverlay({
   videoUrl,
@@ -133,15 +142,16 @@ export default function PoseOverlay({
 
   const animationFrameIdRef = useRef(null);
   const lastSampleTimeRef = useRef(0);
-  const SAMPLE_INTERVAL_MS = 66; // ~15 FPS target rate
+  const SAMPLE_INTERVAL_MS = 66;
 
-  // Resize canvas when container or video resizes
+  // Keep the canvas aligned with the video element.
   const syncCanvasSize = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return;
+
     const video = videoRef.current;
     const canvas = canvasRef.current;
-
     const rect = video.getBoundingClientRect();
+
     if (rect.width > 0 && rect.height > 0) {
       canvas.width = rect.width;
       canvas.height = rect.height;
@@ -151,10 +161,11 @@ export default function PoseOverlay({
   useEffect(() => {
     syncCanvasSize();
     window.addEventListener('resize', syncCanvasSize);
+
     return () => window.removeEventListener('resize', syncCanvasSize);
   }, [syncCanvasSize]);
 
-  // Main frame sampling loop
+  // Main frame-sampling loop.
   const frameLoop = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -164,6 +175,7 @@ export default function PoseOverlay({
     }
 
     const now = performance.now();
+
     if (now - lastSampleTimeRef.current >= SAMPLE_INTERVAL_MS) {
       lastSampleTimeRef.current = now;
 
@@ -179,7 +191,6 @@ export default function PoseOverlay({
               onPoseUpdate(result);
             }
 
-            // Draw to canvas overlay
             const ctx = canvas.getContext('2d');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -206,6 +217,7 @@ export default function PoseOverlay({
 
   const handlePlay = () => {
     if (!videoRef.current) return;
+
     videoRef.current.play();
     setIsPlaying(true);
     animationFrameIdRef.current = requestAnimationFrame(frameLoop);
@@ -213,8 +225,10 @@ export default function PoseOverlay({
 
   const handlePause = () => {
     if (!videoRef.current) return;
+
     videoRef.current.pause();
     setIsPlaying(false);
+
     if (animationFrameIdRef.current) {
       cancelAnimationFrame(animationFrameIdRef.current);
     }
@@ -230,29 +244,36 @@ export default function PoseOverlay({
 
   const handleRestart = () => {
     if (!videoRef.current) return;
+
     videoRef.current.currentTime = 0;
     resetAnalysisSession();
+
     const canvas = canvasRef.current;
+
     if (canvas) {
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
+
     handlePlay();
   };
 
   const handleSpeedChange = (speed) => {
     setPlaybackSpeed(speed);
+
     if (videoRef.current) {
       videoRef.current.playbackRate = speed;
     }
   };
 
-  // Video event listeners
+  // Video event listeners.
   const onVideoEnded = () => {
     setIsPlaying(false);
+
     if (animationFrameIdRef.current) {
       cancelAnimationFrame(animationFrameIdRef.current);
     }
+
     if (onAnalysisFinished) {
       onAnalysisFinished();
     }
@@ -266,56 +287,125 @@ export default function PoseOverlay({
     };
   }, []);
 
+  const statusColor = isModelReady
+    ? '#159a73'
+    : isModelLoading
+    ? '#d49424'
+    : '#dc5267';
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      {/* Model Status Pill */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1rem',
+        minWidth: 0
+      }}
+    >
+      {/* Model status and tracking indicators */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '0.65rem'
+        }}
+      >
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.65rem',
+            padding: '0.6rem 0.85rem',
+            borderRadius: '999px',
+            background: 'rgba(255, 255, 255, 0.78)',
+            border: '1px solid rgba(145, 163, 196, 0.24)',
+            boxShadow: '0 3px 12px rgba(58, 83, 138, 0.045)',
+            fontSize: '0.8rem',
+            color: '#34445f'
+          }}
+        >
           <span
             style={{
-              width: '10px',
-              height: '10px',
+              width: '9px',
+              height: '9px',
               borderRadius: '50%',
-              backgroundColor: isModelReady ? '#10b981' : isModelLoading ? '#f59e0b' : '#f43f5e',
-              display: 'inline-block'
+              backgroundColor: statusColor,
+              boxShadow: `0 0 0 3px ${isModelReady ? 'rgba(21, 154, 115, 0.12)' : 'rgba(148, 163, 184, 0.12)'}`,
+              flexShrink: 0
             }}
           />
-          <span style={{ color: '#cbd5e1' }}>
+
+          <span>
             {isModelReady
-              ? 'MediaPipe Pose Landmarker Active (Real-Time Video Mode)'
+              ? 'Pose Landmarker Active'
               : isModelLoading
               ? 'Initializing Landmarker...'
               : 'Model Error'}
           </span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
-          <span style={{ color: hasPersonInFrame ? '#34d399' : '#94a3b8' }}>
-            {hasPersonInFrame ? '● Tracking Person' : '○ Searching for Person'}
-          </span>
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.45rem',
+            padding: '0.55rem 0.8rem',
+            borderRadius: '999px',
+            background: hasPersonInFrame
+              ? 'rgba(224, 248, 239, 0.85)'
+              : 'rgba(255, 255, 255, 0.75)',
+            border: `1px solid ${
+              hasPersonInFrame
+                ? 'rgba(21, 154, 115, 0.2)'
+                : 'rgba(145, 163, 196, 0.24)'
+            }`,
+            color: hasPersonInFrame ? '#087b5b' : '#728098',
+            fontSize: '0.78rem',
+            fontWeight: 600
+          }}
+        >
+          <span>{hasPersonInFrame ? '●' : '○'}</span>
+          {hasPersonInFrame ? 'Tracking person' : 'Searching for person'}
         </div>
       </div>
 
+      {/* Model error */}
       {modelError && (
-        <div style={{ padding: '0.75rem', borderRadius: '6px', backgroundColor: 'rgba(244, 63, 94, 0.15)', color: '#fda4af', fontSize: '0.825rem' }}>
-          <strong>Model Error:</strong> {modelError}
+        <div
+          role="alert"
+          style={{
+            padding: '0.9rem 1rem',
+            borderRadius: '13px',
+            background: 'rgba(255, 239, 242, 0.9)',
+            border: '1px solid rgba(220, 82, 103, 0.22)',
+            color: '#a8324a',
+            fontSize: '0.85rem',
+            lineHeight: 1.6
+          }}
+        >
+          <strong>Model error:</strong> {modelError}
         </div>
       )}
 
-      {/* Synchronized Video & Canvas Overlay Viewport */}
+      {/* Synchronized video and canvas viewport */}
       <div
         ref={containerRef}
         style={{
           position: 'relative',
-          backgroundColor: '#000000',
-          borderRadius: '10px',
+          backgroundColor: '#111827',
+          borderRadius: '18px',
           overflow: 'hidden',
-          aspectRatio: videoMetadata ? `${videoMetadata.width} / ${videoMetadata.height}` : '16 / 9',
+          aspectRatio: videoMetadata
+            ? `${videoMetadata.width} / ${videoMetadata.height}`
+            : '16 / 9',
           maxHeight: '440px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          border: '1px solid #334155'
+          border: '1px solid rgba(120, 140, 180, 0.28)',
+          boxShadow: '0 12px 30px rgba(34, 49, 82, 0.12)'
         }}
       >
         <video
@@ -344,123 +434,222 @@ export default function PoseOverlay({
           }}
         />
 
-        {/* Floating Telemetry HUD */}
+        {/* Floating glass telemetry panel */}
         <div
           style={{
             position: 'absolute',
             top: '12px',
             right: '12px',
-            backgroundColor: 'rgba(15, 23, 42, 0.8)',
-            backdropFilter: 'blur(4px)',
-            border: '1px solid rgba(51, 65, 85, 0.7)',
-            borderRadius: '6px',
-            padding: '0.35rem 0.65rem',
-            fontSize: '0.75rem',
-            color: '#e2e8f0',
+            background: 'rgba(255, 255, 255, 0.88)',
+            WebkitBackdropFilter: 'blur(14px)',
+            backdropFilter: 'blur(14px)',
+            border: '1px solid rgba(255, 255, 255, 0.8)',
+            borderRadius: '12px',
+            padding: '0.65rem 0.8rem',
+            fontSize: '0.72rem',
+            color: '#273651',
             display: 'flex',
             flexDirection: 'column',
-            gap: '0.2rem',
-            zIndex: 20
+            gap: '0.35rem',
+            minWidth: '132px',
+            zIndex: 20,
+            boxShadow: '0 6px 22px rgba(15, 23, 42, 0.12)'
           }}
         >
+          <div
+            style={{
+              fontSize: '0.65rem',
+              fontWeight: 750,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              color: '#71809a',
+              marginBottom: '0.1rem'
+            }}
+          >
+            Analysis telemetry
+          </div>
+
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem' }}>
-            <span style={{ color: '#94a3b8' }}>Rate:</span>
+            <span style={{ color: '#71809a' }}>Rate</span>
             <strong>{analysisStats.currentFps} FPS</strong>
           </div>
+
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem' }}>
-            <span style={{ color: '#94a3b8' }}>Usable Frames:</span>
-            <strong style={{ color: analysisStats.usableRatio > 0.8 ? '#34d399' : '#fbbf24' }}>
+            <span style={{ color: '#71809a' }}>Usable frames</span>
+            <strong style={{ color: analysisStats.usableRatio > 0.8 ? '#087b5b' : '#a66b12' }}>
               {(analysisStats.usableRatio * 100).toFixed(0)}%
             </strong>
           </div>
+
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem' }}>
-            <span style={{ color: '#94a3b8' }}>Frames:</span>
-            <span>{analysisStats.totalFrames}</span>
+            <span style={{ color: '#71809a' }}>Frames</span>
+            <strong>{analysisStats.totalFrames}</strong>
           </div>
         </div>
+
+        {/* Overlay visibility indicator */}
+        {!isOverlayVisible && (
+          <div
+            style={{
+              position: 'absolute',
+              left: '12px',
+              top: '12px',
+              padding: '0.4rem 0.65rem',
+              borderRadius: '999px',
+              background: 'rgba(255, 255, 255, 0.88)',
+              color: '#34445f',
+              fontSize: '0.7rem',
+              fontWeight: 600,
+              zIndex: 20
+            }}
+          >
+            Skeleton hidden
+          </div>
+        )}
       </div>
 
-      {/* Playback & Overlay Control Bar */}
+      {/* Playback and overlay control bar */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           flexWrap: 'wrap',
-          gap: '0.75rem',
-          padding: '0.75rem 1rem',
-          backgroundColor: 'rgba(15, 23, 42, 0.7)',
-          border: '1px solid #334155',
-          borderRadius: '8px'
+          gap: '0.85rem',
+          padding: '0.85rem',
+          background: 'rgba(255, 255, 255, 0.76)',
+          WebkitBackdropFilter: 'blur(16px)',
+          backdropFilter: 'blur(16px)',
+          border: '1px solid rgba(255, 255, 255, 0.9)',
+          borderRadius: '16px',
+          boxShadow: '0 5px 18px rgba(58, 83, 138, 0.055)'
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.55rem',
+            flexWrap: 'wrap'
+          }}
+        >
           <button
             type="button"
             onClick={handleTogglePlay}
             disabled={!isModelReady}
             style={{
-              padding: '0.45rem 1rem',
-              backgroundColor: isPlaying ? '#e11d48' : '#0284c7',
+              padding: '0.65rem 0.95rem',
+              background: !isModelReady
+                ? '#b8c5e5'
+                : isPlaying
+                ? 'linear-gradient(135deg, #e15b72, #d94161)'
+                : 'linear-gradient(135deg, #5278f5, #6d70ed)',
               color: '#ffffff',
-              border: 'none',
-              borderRadius: '6px',
-              fontSize: '0.85rem',
-              fontWeight: 600,
+              border: '1px solid rgba(255, 255, 255, 0.45)',
+              borderRadius: '10px',
+              fontSize: '0.82rem',
+              fontWeight: 650,
               cursor: isModelReady ? 'pointer' : 'not-allowed',
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.35rem'
+              justifyContent: 'center',
+              gap: '0.4rem',
+              boxShadow: isModelReady
+                ? '0 5px 13px rgba(82, 120, 245, 0.18)'
+                : 'none',
+              transition: 'box-shadow 0.2s ease, transform 0.2s ease'
             }}
           >
-            {isPlaying ? '⏸ Pause Analysis' : '▶ Start Analysis'}
+            {isPlaying ? 'Ⅱ Pause analysis' : '▶ Start analysis'}
           </button>
 
           <button
             type="button"
             onClick={handleRestart}
             style={{
-              padding: '0.45rem 0.75rem',
-              backgroundColor: 'transparent',
-              border: '1px solid #475569',
-              color: '#cbd5e1',
-              borderRadius: '6px',
-              fontSize: '0.85rem',
-              cursor: 'pointer'
+              padding: '0.62rem 0.8rem',
+              background: 'rgba(255, 255, 255, 0.85)',
+              border: '1px solid rgba(145, 163, 196, 0.35)',
+              color: '#4b5d79',
+              borderRadius: '10px',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'background 0.2s ease'
             }}
           >
             ↺ Replay
           </button>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-          {/* Skeleton Overlay Toggle */}
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.825rem', color: '#cbd5e1', cursor: 'pointer' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.9rem',
+            flexWrap: 'wrap'
+          }}
+        >
+          {/* Skeleton overlay toggle */}
+          <label
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.45rem',
+              fontSize: '0.8rem',
+              color: '#52627c',
+              cursor: 'pointer'
+            }}
+          >
             <input
               type="checkbox"
               checked={isOverlayVisible}
               onChange={(e) => setIsOverlayVisible(e.target.checked)}
-              style={{ accentColor: '#0284c7' }}
+              style={{
+                accentColor: '#5278f5',
+                width: '15px',
+                height: '15px',
+                cursor: 'pointer'
+              }}
             />
-            Show Pose Skeleton
+            Show skeleton
           </label>
 
-          {/* Speed Selector */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.825rem', color: '#94a3b8' }}>
-            <span>Speed:</span>
+          {/* Playback speed selector */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.3rem',
+              fontSize: '0.78rem',
+              color: '#728098'
+            }}
+          >
+            <span style={{ marginRight: '0.15rem' }}>Speed</span>
+
             {[0.5, 0.75, 1].map((speed) => (
               <button
                 key={speed}
                 type="button"
                 onClick={() => handleSpeedChange(speed)}
+                aria-pressed={playbackSpeed === speed}
                 style={{
-                  padding: '0.2rem 0.45rem',
-                  borderRadius: '4px',
-                  border: `1px solid ${playbackSpeed === speed ? '#38bdf8' : '#334155'}`,
-                  backgroundColor: playbackSpeed === speed ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
-                  color: playbackSpeed === speed ? '#38bdf8' : '#94a3b8',
-                  fontSize: '0.75rem',
-                  cursor: 'pointer'
+                  padding: '0.35rem 0.48rem',
+                  borderRadius: '7px',
+                  border: `1px solid ${
+                    playbackSpeed === speed
+                      ? 'rgba(82, 120, 245, 0.35)'
+                      : 'rgba(145, 163, 196, 0.25)'
+                  }`,
+                  background:
+                    playbackSpeed === speed
+                      ? 'rgba(82, 120, 245, 0.1)'
+                      : 'rgba(255, 255, 255, 0.75)',
+                  color: playbackSpeed === speed ? '#4568dc' : '#728098',
+                  fontSize: '0.74rem',
+                  fontWeight: playbackSpeed === speed ? 700 : 500,
+                  cursor: 'pointer',
+                  transition: 'background 0.2s ease, border-color 0.2s ease'
                 }}
               >
                 {speed}x
