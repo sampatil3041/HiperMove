@@ -40,7 +40,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start listening if run directly
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`[HiperMove Backend] Server listening on port ${PORT}`);
   console.log(`[HiperMove Backend] Health check: http://localhost:${PORT}/api/health`);
 });
